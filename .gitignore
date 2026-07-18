@@ -1,0 +1,21 @@
+# 印刷コンテンツ(Markdown・画像)はイベントごとのデータなので管理しない。
+# 使うときは print.md.example を contents/print.md にコピーし、
+# 参照する画像を contents/images/ に置く。
+#
+# ただし print.md.example と、そこから参照する sample.png はサンプルとして管理する。
+# contents/* が contents/images ごと除外してしまうと、その中のファイルは
+# 否定パターンでも復活できない。ディレクトリを一度戻してから中身を除外すること。
+contents/*
+!contents/print.md.example
+!contents/verbs.txt.example
+!contents/images/
+contents/images/*
+!contents/images/sample.png
+
+# 生成物。npm run gen で作られる
+sketch/content.h
+
+node_modules/
+
+# arduino-cli に --build-path を指定した場合の出力先
+build/

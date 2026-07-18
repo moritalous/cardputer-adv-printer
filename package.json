@@ -1,0 +1,15 @@
+{
+  "name": "cardputer-adv-printer",
+  "private": true,
+  "type": "module",
+  "description": "M5Stack Cardputer ADV からキーボード入力を差し込んだ Markdown を USB サーマルプリンタへ印刷する",
+  "scripts": {
+    "gen": "node tools/gen-content.mjs --mode standard",
+    "build": "npm run gen && node tools/build.mjs",
+    "flash": "npm run gen && node tools/flash.mjs",
+    "scan": "node tools/scan.mjs"
+  },
+  "dependencies": {
+    "jimp": "^1.6.1"
+  }
+}

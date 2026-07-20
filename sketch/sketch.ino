@@ -26,10 +26,53 @@ const size_t MAX_TEXT = 1000;
 
 const char* INPUT_PROMPT = "Enter your name";
 
+const uint8_t SPK_VOLUME = 128;  // 0-255
+
+// Stamp-S3A onboard WS2812. GPIO38 gates its power rail and must be driven
+// high before the data pin does anything (Cardputer ADV docs).
+const int LED_PWR_PIN  = 38;
+const int LED_DATA_PIN = 21;
+
 M5Canvas canvas(&M5Cardputer.Display);
 
 String text;
 bool busy = false;
+
+void ledColor(uint8_t r, uint8_t g, uint8_t b) {
+  neopixelWrite(LED_DATA_PIN, r, g, b);
+}
+
+void ledOff() {
+  ledColor(0, 0, 0);
+}
+
+// tone() is fire-and-forget; sequences interleave delay() so each note is heard.
+void soundKey()   { M5Cardputer.Speaker.tone(6000, 15); }
+void soundDel()   { M5Cardputer.Speaker.tone(3000, 20); }
+
+void soundClear() {
+  M5Cardputer.Speaker.tone(2000, 60);
+  delay(70);
+  M5Cardputer.Speaker.tone(1200, 90);
+}
+
+// Typewriter bell on Enter.
+void soundBell()  { M5Cardputer.Speaker.tone(2794, 120); }
+
+void soundOk() {
+  const uint16_t seq[][2] = { { 1047, 90 }, { 1319, 90 }, { 1568, 140 } };
+  for (auto& n : seq) {
+    M5Cardputer.Speaker.tone(n[0], n[1]);
+    delay(n[1] + 15);
+  }
+}
+
+void soundError() {
+  for (int i = 0; i < 2; i++) {
+    M5Cardputer.Speaker.tone(220, 120);
+    delay(160);
+  }
+}
 
 String expandTokens(const char* t) {
   String s(t);
@@ -181,6 +224,8 @@ void statusScreen() {
 
 void doPrint() {
   busy = true;
+  ledColor(0, 40, 60);  // cyan: printing
+  soundBell();
   statusScreen();
   auto& d = M5Cardputer.Display;
 
@@ -191,7 +236,10 @@ void doPrint() {
     if (!usbPrinterStart()) {
       d.setTextColor(TFT_RED, TFT_BLACK);
       d.println(usbPrinterStatus());
+      ledColor(60, 0, 0);
+      soundError();
       delay(2500);
+      ledOff();
       busy = false;
       drawEditor();
       return;
@@ -204,7 +252,10 @@ void doPrint() {
     d.println(usbPrinterStatus());
     d.setTextColor(TFT_WHITE, TFT_BLACK);
     d.println("Check cable & power.");
+    ledColor(60, 0, 0);
+    soundError();
     delay(2500);
+    ledOff();
     busy = false;
     drawEditor();
     return;
@@ -215,7 +266,10 @@ void doPrint() {
   if (h <= 0 || h > MAX_CANVAS_H) {
     d.setTextColor(TFT_RED, TFT_BLACK);
     d.println(h > MAX_CANVAS_H ? "Content too tall" : "Render failed");
+    ledColor(60, 0, 0);
+    soundError();
     delay(2500);
+    ledOff();
     busy = false;
     drawEditor();
     return;
@@ -227,14 +281,19 @@ void doPrint() {
   if (printed) {
     d.setTextColor(TFT_GREEN, TFT_BLACK);
     d.println("Done");
+    ledColor(0, 60, 0);
+    soundOk();
     text = "";  // clear the input on success, same as esc
   } else {
     d.setTextColor(TFT_RED, TFT_BLACK);
     d.println(usbPrinterStatus());
+    ledColor(60, 0, 0);
+    soundError();
   }
 
   // The USB link stays connected between jobs; no disconnect, no drain wait.
   delay(1000);
+  ledOff();
   busy = false;
   drawEditor();
 }
@@ -253,6 +312,11 @@ void setup() {
   auto cfg = M5.config();
   M5Cardputer.begin(cfg, true);
   M5Cardputer.Display.setRotation(1);
+  M5Cardputer.Speaker.setVolume(SPK_VOLUME);
+
+  pinMode(LED_PWR_PIN, OUTPUT);
+  digitalWrite(LED_PWR_PIN, HIGH);
+  ledOff();
 
   canvas.setColorDepth(1);
   if (!canvas.createSprite(WIDTH, MAX_CANVAS_H)) {
@@ -288,6 +352,7 @@ void loop() {
       bool changed = false;
       if (st.del && text.length() > 0) {
         text.remove(text.length() - 1);
+        soundDel();
         changed = true;
       }
       for (char c : st.word) {
@@ -295,10 +360,12 @@ void loop() {
         if (c == '`' || c == '~') {
           if (text.length() > 0) {
             text = "";
+            soundClear();
             changed = true;
           }
         } else if (text.length() < MAX_TEXT) {
           text += c;
+          soundKey();
           changed = true;
         }
       }

@@ -17,6 +17,16 @@ const int MAX_CANVAS_H = 2000;
 
 const int LABEL_H = 18;
 
+// Battery gauge, top-right of the editor view.
+const int BATT_W       = 22;
+const int BATT_H       = 11;
+const int BATT_NUB_W   = 2;
+const int BATT_PAD_R   = 4;
+const int BATT_Y       = 4;
+const int BATT_TEXT_H  = 12;
+// ADC read; no need to do it every loop.
+const uint32_t BATT_POLL_MS = 10000;
+
 // Single GS v 0 block for the whole job. Splitting makes the printer feed
 // paper between blocks, leaving white seams. Cold-start job loss is fixed by
 // the handshake in usb_printer.cpp, not by splitting.
@@ -37,6 +47,10 @@ M5Canvas canvas(&M5Cardputer.Display);
 
 String text;
 bool busy = false;
+bool ready = false;  // editor is on screen (false while a fatal screen is up)
+
+int battLevel = -1;
+uint32_t battPolledAt = 0;
 
 void ledColor(uint8_t r, uint8_t g, uint8_t b) {
   neopixelWrite(LED_DATA_PIN, r, g, b);
@@ -119,6 +133,49 @@ int drawContent() {
   return canvas.getCursorY() + BOTTOM_PAD;
 }
 
+// Battery ADC on GPIO10 (M5Unified handles the 2.0 divider). isCharging() has
+// no case for pmic_adc on this board, so the gauge shows level only.
+void drawBattery() {
+  auto& d = M5Cardputer.Display;
+  const int x = d.width() - BATT_PAD_R - BATT_W - BATT_NUB_W;
+  const int lv = battLevel < 0 ? 0 : battLevel;
+  const uint16_t col = lv <= 15 ? TFT_RED : (lv <= 30 ? TFT_ORANGE : TFT_GREEN);
+
+  d.fillRect(x, BATT_Y, BATT_W + BATT_NUB_W, BATT_H, TFT_BLACK);
+  d.drawRect(x, BATT_Y, BATT_W, BATT_H, TFT_WHITE);
+  d.fillRect(x + BATT_W, BATT_Y + 3, BATT_NUB_W, BATT_H - 6, TFT_WHITE);
+
+  const int inner = BATT_W - 4;
+  const int w = inner * lv / 100;
+  if (w > 0) d.fillRect(x + 2, BATT_Y + 2, w, BATT_H - 4, col);
+
+  // Percentage below the icon: the prompt is centered on the same rows, so
+  // stacking keeps the two from colliding.
+  const int ty = BATT_Y + BATT_H + 2;
+  d.fillRect(x - 12, ty, BATT_W + BATT_NUB_W + 12, BATT_TEXT_H, TFT_BLACK);
+  d.setFont(&fonts::lgfxJapanGothic_12);
+  d.setTextColor(col, TFT_BLACK);
+  d.setTextDatum(top_right);
+  if (battLevel < 0) {
+    d.drawString("--", d.width() - BATT_PAD_R, ty);
+  } else {
+    d.drawString(String(battLevel) + "%", d.width() - BATT_PAD_R, ty);
+  }
+  d.setTextDatum(top_left);
+  d.setTextColor(TFT_WHITE, TFT_BLACK);
+}
+
+void pollBattery(bool force) {
+  const uint32_t now = millis();
+  if (!force && now - battPolledAt < BATT_POLL_MS) return;
+  battPolledAt = now;
+
+  const int lv = M5Cardputer.Power.getBatteryLevel();
+  if (lv == battLevel) return;
+  battLevel = lv;
+  if (ready && !busy) drawBattery();
+}
+
 void drawLabels() {
   auto& d = M5Cardputer.Display;
   const int y = d.height() - LABEL_H;
@@ -166,6 +223,7 @@ void drawEditor() {
   d.setTextColor(TFT_WHITE, TFT_BLACK);
   d.clearClipRect();
 
+  drawBattery();
   drawLabels();
 }
 
@@ -336,12 +394,15 @@ void setup() {
     return;
   }
 
+  pollBattery(true);
+  ready = true;
   drawEditor();
 }
 
 void loop() {
   M5Cardputer.update();
   usbPrinterPump();
+  pollBattery(false);
 
   if (!busy && M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
     auto st = M5Cardputer.Keyboard.keysState();
